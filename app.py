@@ -1,12 +1,15 @@
 from flask import Flask, render_template, request, jsonify, Response
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import os
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 app = Flask(__name__)
-DATABASE = "inventory.db"
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
 # ========================================
@@ -14,21 +17,45 @@ DATABASE = "inventory.db"
 # ========================================
 
 def get_db_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is not set."
+        )
+
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor
+    )
+
+
+def execute(connection, query, params=()):
+    cursor = connection.cursor()
+    cursor.execute(query, params)
+    return cursor
 
 
 def time_ago(timestamp):
     if not timestamp:
         return ""
 
-    activity_time = datetime.strptime(
-        timestamp,
-        "%Y-%m-%d %H:%M:%S"
-    )
+    if isinstance(timestamp, str):
+        try:
+            activity_time = datetime.fromisoformat(timestamp)
+        except ValueError:
+            activity_time = datetime.strptime(
+                timestamp,
+                "%Y-%m-%d %H:%M:%S"
+            )
+    else:
+        activity_time = timestamp
 
-    difference = datetime.utcnow() - activity_time
+    if activity_time.tzinfo is not None:
+        now = datetime.now(timezone.utc)
+        activity_time = activity_time.astimezone(timezone.utc)
+    else:
+        now = datetime.utcnow()
+
+    difference = now - activity_time
     seconds = difference.total_seconds()
 
     if seconds < 60:
@@ -37,12 +64,20 @@ def time_ago(timestamp):
     minutes = int(seconds // 60)
 
     if minutes < 60:
-        return "1 min ago" if minutes == 1 else f"{minutes} min ago"
+        return (
+            "1 min ago"
+            if minutes == 1
+            else f"{minutes} min ago"
+        )
 
     hours = int(minutes // 60)
 
     if hours < 24:
-        return "1 hour ago" if hours == 1 else f"{hours} hours ago"
+        return (
+            "1 hour ago"
+            if hours == 1
+            else f"{hours} hours ago"
+        )
 
     days = int(hours // 24)
 
@@ -55,19 +90,27 @@ def time_ago(timestamp):
     return activity_time.strftime("%b %d, %Y")
 
 
-def log_activity(connection, product_id, action, product_name, details):
-    """Save a product activity to the activity log."""
+def log_activity(
+    connection,
+    product_id,
+    action,
+    product_name,
+    details
+):
+    cursor = connection.cursor()
 
-    connection.execute("""
+    cursor.execute("""
         INSERT INTO activity_log
         (product_id, action, product_name, details)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
     """, (
         product_id,
         action,
         product_name,
         details
     ))
+
+    cursor.close()
 
 
 # ========================================
@@ -76,15 +119,16 @@ def log_activity(connection, product_id, action, product_name, details):
 
 def create_database():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
     # Products
-    connection.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
             quantity INTEGER NOT NULL DEFAULT 0,
-            price REAL NOT NULL DEFAULT 0,
+            price DOUBLE PRECISION NOT NULL DEFAULT 0,
             supplier TEXT,
             status TEXT NOT NULL DEFAULT 'Active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,27 +136,27 @@ def create_database():
     """)
 
     # Categories
-    connection.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     # Suppliers
-    connection.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS suppliers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     # Activity Log
-    connection.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS activity_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             product_id INTEGER,
             action TEXT NOT NULL,
             product_name TEXT,
@@ -121,24 +165,14 @@ def create_database():
         )
     """)
 
-    # Migration for databases created before product_id existed
-    activity_columns = connection.execute(
-        "PRAGMA table_info(activity_log)"
-    ).fetchall()
+    # Migration safety
+    cursor.execute("""
+        ALTER TABLE activity_log
+        ADD COLUMN IF NOT EXISTS product_id INTEGER
+    """)
 
-    activity_column_names = [
-        column["name"]
-        for column in activity_columns
-    ]
-
-    if "product_id" not in activity_column_names:
-        connection.execute("""
-            ALTER TABLE activity_log
-            ADD COLUMN product_id INTEGER
-        """)
-
-    # Connect old history records to current products
-    connection.execute("""
+    # Connect older history records
+    cursor.execute("""
         UPDATE activity_log
         SET product_id = (
             SELECT products.id
@@ -150,24 +184,27 @@ def create_database():
     """)
 
     # Copy existing categories
-    connection.execute("""
-        INSERT OR IGNORE INTO categories (name)
+    cursor.execute("""
+        INSERT INTO categories (name)
         SELECT DISTINCT category
         FROM products
         WHERE category IS NOT NULL
         AND TRIM(category) != ''
+        ON CONFLICT (name) DO NOTHING
     """)
 
     # Copy existing suppliers
-    connection.execute("""
-        INSERT OR IGNORE INTO suppliers (name)
+    cursor.execute("""
+        INSERT INTO suppliers (name)
         SELECT DISTINCT supplier
         FROM products
         WHERE supplier IS NOT NULL
         AND TRIM(supplier) != ''
+        ON CONFLICT (name) DO NOTHING
     """)
 
     connection.commit()
+    cursor.close()
     connection.close()
 
 
@@ -178,20 +215,24 @@ def create_database():
 @app.route("/")
 def home():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    products = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
         ORDER BY id DESC
-    """).fetchall()
+    """)
+    products = cursor.fetchall()
 
-    activities = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM activity_log
         ORDER BY id DESC
         LIMIT 5
-    """).fetchall()
+    """)
+    activities = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     activities = [
@@ -211,7 +252,9 @@ def home():
 
     for product in products:
         category = product["category"]
-        categories[category] = categories.get(category, 0) + 1
+        categories[category] = (
+            categories.get(category, 0) + 1
+        )
 
     return render_template(
         "index.html",
@@ -230,25 +273,30 @@ def home():
 @app.route("/products")
 def products_page():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    products = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
         ORDER BY id DESC
-    """).fetchall()
+    """)
+    products = cursor.fetchall()
 
-    categories = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM categories
         ORDER BY name
-    """).fetchall()
+    """)
+    categories = cursor.fetchall()
 
-    suppliers = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM suppliers
         ORDER BY name
-    """).fetchall()
+    """)
+    suppliers = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     return render_template(
@@ -274,33 +322,48 @@ def add_product():
     try:
         quantity = int(data.get("quantity", 0))
         price = float(data.get("price", 0))
-
     except (ValueError, TypeError):
         return jsonify({
             "success": False,
-            "message": "Quantity and price must be valid numbers."
+            "message":
+                "Quantity and price must be valid numbers."
         }), 400
 
     if not name or not category:
         return jsonify({
             "success": False,
-            "message": "Product name and category are required."
+            "message":
+                "Product name and category are required."
         }), 400
 
     if quantity < 0 or price < 0:
         return jsonify({
             "success": False,
-            "message": "Quantity and price cannot be negative."
+            "message":
+                "Quantity and price cannot be negative."
         }), 400
 
-    status = "Low Stock" if quantity <= 5 else "Active"
+    status = (
+        "Low Stock"
+        if quantity <= 5
+        else "Active"
+    )
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    cursor = connection.execute("""
+    cursor.execute("""
         INSERT INTO products
-        (name, category, quantity, price, supplier, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (
+            name,
+            category,
+            quantity,
+            price,
+            supplier,
+            status
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
     """, (
         name,
         category,
@@ -310,7 +373,7 @@ def add_product():
         status
     ))
 
-    product_id = cursor.lastrowid
+    product_id = cursor.fetchone()["id"]
 
     log_activity(
         connection,
@@ -321,6 +384,7 @@ def add_product():
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
@@ -334,7 +398,10 @@ def add_product():
 # UPDATE PRODUCT
 # ========================================
 
-@app.route("/api/products/<int:product_id>", methods=["PUT"])
+@app.route(
+    "/api/products/<int:product_id>",
+    methods=["PUT"]
+)
 def update_product(product_id):
     data = request.get_json() or {}
 
@@ -345,34 +412,40 @@ def update_product(product_id):
     try:
         quantity = int(data.get("quantity", 0))
         price = float(data.get("price", 0))
-
     except (ValueError, TypeError):
         return jsonify({
             "success": False,
-            "message": "Quantity and price must be valid numbers."
+            "message":
+                "Quantity and price must be valid numbers."
         }), 400
 
     if not name or not category:
         return jsonify({
             "success": False,
-            "message": "Product name and category are required."
+            "message":
+                "Product name and category are required."
         }), 400
 
     if quantity < 0 or price < 0:
         return jsonify({
             "success": False,
-            "message": "Quantity and price cannot be negative."
+            "message":
+                "Quantity and price cannot be negative."
         }), 400
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    old_product = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
-        WHERE id = ?
-    """, (product_id,)).fetchone()
+        WHERE id = %s
+    """, (product_id,))
+
+    old_product = cursor.fetchone()
 
     if not old_product:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -382,17 +455,21 @@ def update_product(product_id):
 
     old_quantity = old_product["quantity"]
 
-    status = "Low Stock" if quantity <= 5 else "Active"
+    status = (
+        "Low Stock"
+        if quantity <= 5
+        else "Active"
+    )
 
-    connection.execute("""
+    cursor.execute("""
         UPDATE products
-        SET name = ?,
-            category = ?,
-            quantity = ?,
-            price = ?,
-            supplier = ?,
-            status = ?
-        WHERE id = ?
+        SET name = %s,
+            category = %s,
+            quantity = %s,
+            price = %s,
+            supplier = %s,
+            status = %s
+        WHERE id = %s
     """, (
         name,
         category,
@@ -419,7 +496,9 @@ def update_product(product_id):
 
     else:
         action = "Product Updated"
-        details = f"{name} information was updated."
+        details = (
+            f"{name} information was updated."
+        )
 
     log_activity(
         connection,
@@ -430,6 +509,7 @@ def update_product(product_id):
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
@@ -437,57 +517,67 @@ def update_product(product_id):
         "message": "Product updated successfully."
     })
 
+
 # ========================================
 # STOCK MOVEMENT
 # ========================================
 
-@app.route("/api/products/<int:product_id>/stock", methods=["POST"])
+@app.route(
+    "/api/products/<int:product_id>/stock",
+    methods=["POST"]
+)
 def update_stock(product_id):
     data = request.get_json() or {}
 
-    movement_type = data.get("type", "").strip().lower()
+    movement_type = (
+        data.get("type", "")
+        .strip()
+        .lower()
+    )
 
     try:
         amount = int(data.get("amount", 0))
-
     except (ValueError, TypeError):
         return jsonify({
             "success": False,
-            "message": "Quantity must be a valid number."
+            "message":
+                "Quantity must be a valid number."
         }), 400
 
     if movement_type not in ["in", "out"]:
         return jsonify({
             "success": False,
-            "message": "Invalid stock movement type."
+            "message":
+                "Invalid stock movement type."
         }), 400
 
     if amount <= 0:
         return jsonify({
             "success": False,
-            "message": "Quantity must be greater than zero."
+            "message":
+                "Quantity must be greater than zero."
         }), 400
 
-
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-
-    product = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
-        WHERE id = ?
-    """, (product_id,)).fetchone()
+        WHERE id = %s
+        FOR UPDATE
+    """, (product_id,))
 
+    product = cursor.fetchone()
 
     if not product:
-
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
             "message": "Product not found."
         }), 404
-
 
     old_quantity = product["quantity"]
     product_name = product["name"]
@@ -498,16 +588,8 @@ def update_stock(product_id):
         else "units"
     )
 
-
-    # ========================================
-    # STOCK IN
-    # ========================================
-
     if movement_type == "in":
-
-        new_quantity = (
-            old_quantity + amount
-        )
+        new_quantity = old_quantity + amount
 
         action = "Stock In"
 
@@ -518,15 +600,9 @@ def update_stock(product_id):
             f"{new_quantity} units."
         )
 
-
-    # ========================================
-    # STOCK OUT
-    # ========================================
-
     else:
-
         if amount > old_quantity:
-
+            cursor.close()
             connection.close()
 
             available_word = (
@@ -543,10 +619,7 @@ def update_stock(product_id):
                     f"{available_word} available."
             }), 400
 
-
-        new_quantity = (
-            old_quantity - amount
-        )
+        new_quantity = old_quantity - amount
 
         action = "Stock Out"
 
@@ -557,33 +630,22 @@ def update_stock(product_id):
             f"{new_quantity} units."
         )
 
-
-    # ========================================
-    # UPDATE STATUS
-    # ========================================
-
     status = (
         "Low Stock"
         if new_quantity <= 5
         else "Active"
     )
 
-
-    connection.execute("""
+    cursor.execute("""
         UPDATE products
-        SET quantity = ?,
-            status = ?
-        WHERE id = ?
+        SET quantity = %s,
+            status = %s
+        WHERE id = %s
     """, (
         new_quantity,
         status,
         product_id
     ))
-
-
-    # ========================================
-    # SAVE HISTORY
-    # ========================================
 
     log_activity(
         connection,
@@ -593,10 +655,9 @@ def update_stock(product_id):
         details
     )
 
-
     connection.commit()
+    cursor.close()
     connection.close()
-
 
     return jsonify({
         "success": True,
@@ -614,17 +675,24 @@ def update_stock(product_id):
 # DELETE PRODUCT
 # ========================================
 
-@app.route("/api/products/<int:product_id>", methods=["DELETE"])
+@app.route(
+    "/api/products/<int:product_id>",
+    methods=["DELETE"]
+)
 def delete_product(product_id):
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    product = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
-        WHERE id = ?
-    """, (product_id,)).fetchone()
+        WHERE id = %s
+    """, (product_id,))
+
+    product = cursor.fetchone()
 
     if not product:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -634,7 +702,6 @@ def delete_product(product_id):
 
     product_name = product["name"]
 
-    # Keep history before deleting product
     log_activity(
         connection,
         product_id,
@@ -643,12 +710,13 @@ def delete_product(product_id):
         f"{product_name} was removed from inventory."
     )
 
-    connection.execute(
-        "DELETE FROM products WHERE id = ?",
+    cursor.execute(
+        "DELETE FROM products WHERE id = %s",
         (product_id,)
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
@@ -661,17 +729,24 @@ def delete_product(product_id):
 # PRODUCT HISTORY
 # ========================================
 
-@app.route("/api/products/<int:product_id>/history", methods=["GET"])
+@app.route(
+    "/api/products/<int:product_id>/history",
+    methods=["GET"]
+)
 def product_history(product_id):
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    product = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
-        WHERE id = ?
-    """, (product_id,)).fetchone()
+        WHERE id = %s
+    """, (product_id,))
+
+    product = cursor.fetchone()
 
     if not product:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -679,13 +754,16 @@ def product_history(product_id):
             "message": "Product not found."
         }), 404
 
-    activities = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM activity_log
-        WHERE product_id = ?
+        WHERE product_id = %s
         ORDER BY id DESC
-    """, (product_id,)).fetchall()
+    """, (product_id,))
 
+    activities = cursor.fetchall()
+
+    cursor.close()
     connection.close()
 
     history = [
@@ -693,7 +771,9 @@ def product_history(product_id):
             "id": activity["id"],
             "action": activity["action"],
             "details": activity["details"],
-            "time": time_ago(activity["created_at"])
+            "time": time_ago(
+                activity["created_at"]
+            )
         }
         for activity in activities
     ]
@@ -712,21 +792,31 @@ def product_history(product_id):
 @app.route("/categories")
 def categories():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    category_list = connection.execute("""
+    cursor.execute("""
         SELECT
             c.id,
             c.name AS category,
             COUNT(p.id) AS product_count,
-            COALESCE(SUM(p.quantity), 0) AS total_stock,
-            COALESCE(SUM(p.quantity * p.price), 0) AS total_value
+            COALESCE(
+                SUM(p.quantity),
+                0
+            ) AS total_stock,
+            COALESCE(
+                SUM(p.quantity * p.price),
+                0
+            ) AS total_value
         FROM categories c
         LEFT JOIN products p
             ON p.category = c.name
         GROUP BY c.id, c.name
         ORDER BY c.name
-    """).fetchall()
+    """)
 
+    category_list = cursor.fetchall()
+
+    cursor.close()
     connection.close()
 
     return render_template(
@@ -735,7 +825,10 @@ def categories():
     )
 
 
-@app.route("/api/categories", methods=["POST"])
+@app.route(
+    "/api/categories",
+    methods=["POST"]
+)
 def add_category():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
@@ -743,57 +836,78 @@ def add_category():
     if not name:
         return jsonify({
             "success": False,
-            "message": "Category name is required."
+            "message":
+                "Category name is required."
         }), 400
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
     try:
-        cursor = connection.execute(
-            "INSERT INTO categories (name) VALUES (?)",
-            (name,)
-        )
+        cursor.execute("""
+            INSERT INTO categories (name)
+            VALUES (%s)
+            RETURNING id
+        """, (name,))
+
+        category_id = cursor.fetchone()["id"]
 
         connection.commit()
-        category_id = cursor.lastrowid
 
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        connection.rollback()
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
-            "message": "This category already exists."
+            "message":
+                "This category already exists."
         }), 400
 
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
         "id": category_id,
-        "message": "Category added successfully."
+        "message":
+            "Category added successfully."
     })
 
 
-@app.route("/api/categories/<int:category_id>", methods=["PUT"])
+@app.route(
+    "/api/categories/<int:category_id>",
+    methods=["PUT"]
+)
 def update_category(category_id):
     data = request.get_json() or {}
-    new_name = data.get("name", "").strip()
+
+    new_name = (
+        data.get("name", "")
+        .strip()
+    )
 
     if not new_name:
         return jsonify({
             "success": False,
-            "message": "Category name is required."
+            "message":
+                "Category name is required."
         }), 400
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    category = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM categories
-        WHERE id = ?
-    """, (category_id,)).fetchone()
+        WHERE id = %s
+    """, (category_id,))
+
+    category = cursor.fetchone()
 
     if not category:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -804,19 +918,19 @@ def update_category(category_id):
     old_name = category["name"]
 
     try:
-        connection.execute("""
+        cursor.execute("""
             UPDATE categories
-            SET name = ?
-            WHERE id = ?
+            SET name = %s
+            WHERE id = %s
         """, (
             new_name,
             category_id
         ))
 
-        connection.execute("""
+        cursor.execute("""
             UPDATE products
-            SET category = ?
-            WHERE category = ?
+            SET category = %s
+            WHERE category = %s
         """, (
             new_name,
             old_name
@@ -824,33 +938,45 @@ def update_category(category_id):
 
         connection.commit()
 
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        connection.rollback()
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
-            "message": "This category already exists."
+            "message":
+                "This category already exists."
         }), 400
 
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
-        "message": "Category updated successfully."
+        "message":
+            "Category updated successfully."
     })
 
 
-@app.route("/api/categories/<int:category_id>", methods=["DELETE"])
+@app.route(
+    "/api/categories/<int:category_id>",
+    methods=["DELETE"]
+)
 def delete_category(category_id):
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    category = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM categories
-        WHERE id = ?
-    """, (category_id,)).fetchone()
+        WHERE id = %s
+    """, (category_id,))
+
+    category = cursor.fetchone()
 
     if not category:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -858,32 +984,40 @@ def delete_category(category_id):
             "message": "Category not found."
         }), 404
 
-    product_count = connection.execute("""
+    cursor.execute("""
         SELECT COUNT(*) AS count
         FROM products
-        WHERE category = ?
-    """, (category["name"],)).fetchone()["count"]
+        WHERE category = %s
+    """, (category["name"],))
+
+    product_count = (
+        cursor.fetchone()["count"]
+    )
 
     if product_count > 0:
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
             "message":
-            "This category cannot be deleted because it contains products."
+                "This category cannot be deleted "
+                "because it contains products."
         }), 400
 
-    connection.execute(
-        "DELETE FROM categories WHERE id = ?",
+    cursor.execute(
+        "DELETE FROM categories WHERE id = %s",
         (category_id,)
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
-        "message": "Category deleted successfully."
+        "message":
+            "Category deleted successfully."
     })
 
 
@@ -894,21 +1028,31 @@ def delete_category(category_id):
 @app.route("/suppliers")
 def suppliers():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    supplier_list = connection.execute("""
+    cursor.execute("""
         SELECT
             s.id,
             s.name AS supplier,
             COUNT(p.id) AS product_count,
-            COALESCE(SUM(p.quantity), 0) AS total_stock,
-            COALESCE(SUM(p.quantity * p.price), 0) AS total_value
+            COALESCE(
+                SUM(p.quantity),
+                0
+            ) AS total_stock,
+            COALESCE(
+                SUM(p.quantity * p.price),
+                0
+            ) AS total_value
         FROM suppliers s
         LEFT JOIN products p
             ON p.supplier = s.name
         GROUP BY s.id, s.name
         ORDER BY s.name
-    """).fetchall()
+    """)
 
+    supplier_list = cursor.fetchall()
+
+    cursor.close()
     connection.close()
 
     return render_template(
@@ -917,7 +1061,10 @@ def suppliers():
     )
 
 
-@app.route("/api/suppliers", methods=["POST"])
+@app.route(
+    "/api/suppliers",
+    methods=["POST"]
+)
 def add_supplier():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
@@ -925,61 +1072,83 @@ def add_supplier():
     if not name:
         return jsonify({
             "success": False,
-            "message": "Supplier name is required."
+            "message":
+                "Supplier name is required."
         }), 400
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    existing_supplier = connection.execute("""
+    cursor.execute("""
         SELECT id
         FROM suppliers
-        WHERE LOWER(name) = LOWER(?)
-    """, (name,)).fetchone()
+        WHERE LOWER(name) = LOWER(%s)
+    """, (name,))
+
+    existing_supplier = cursor.fetchone()
 
     if existing_supplier:
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
-            "message": "This supplier already exists."
+            "message":
+                "This supplier already exists."
         }), 400
 
-    cursor = connection.execute(
-        "INSERT INTO suppliers (name) VALUES (?)",
-        (name,)
-    )
+    cursor.execute("""
+        INSERT INTO suppliers (name)
+        VALUES (%s)
+        RETURNING id
+    """, (name,))
+
+    supplier_id = cursor.fetchone()["id"]
 
     connection.commit()
-    supplier_id = cursor.lastrowid
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
         "id": supplier_id,
-        "message": "Supplier added successfully."
+        "message":
+            "Supplier added successfully."
     })
 
 
-@app.route("/api/suppliers/<int:supplier_id>", methods=["PUT"])
+@app.route(
+    "/api/suppliers/<int:supplier_id>",
+    methods=["PUT"]
+)
 def update_supplier(supplier_id):
     data = request.get_json() or {}
-    new_name = data.get("name", "").strip()
+
+    new_name = (
+        data.get("name", "")
+        .strip()
+    )
 
     if not new_name:
         return jsonify({
             "success": False,
-            "message": "Supplier name is required."
+            "message":
+                "Supplier name is required."
         }), 400
 
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    supplier = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM suppliers
-        WHERE id = ?
-    """, (supplier_id,)).fetchone()
+        WHERE id = %s
+    """, (supplier_id,))
+
+    supplier = cursor.fetchone()
 
     if not supplier:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -987,64 +1156,77 @@ def update_supplier(supplier_id):
             "message": "Supplier not found."
         }), 404
 
-    existing = connection.execute("""
+    cursor.execute("""
         SELECT id
         FROM suppliers
-        WHERE LOWER(name) = LOWER(?)
-        AND id != ?
-    """, (
-        new_name,
-        supplier_id
-    )).fetchone()
-
-    if existing:
-        connection.close()
-
-        return jsonify({
-            "success": False,
-            "message": "This supplier already exists."
-        }), 400
-
-    old_name = supplier["name"]
-
-    connection.execute("""
-        UPDATE suppliers
-        SET name = ?
-        WHERE id = ?
+        WHERE LOWER(name) = LOWER(%s)
+        AND id != %s
     """, (
         new_name,
         supplier_id
     ))
 
-    connection.execute("""
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            "success": False,
+            "message":
+                "This supplier already exists."
+        }), 400
+
+    old_name = supplier["name"]
+
+    cursor.execute("""
+        UPDATE suppliers
+        SET name = %s
+        WHERE id = %s
+    """, (
+        new_name,
+        supplier_id
+    ))
+
+    cursor.execute("""
         UPDATE products
-        SET supplier = ?
-        WHERE supplier = ?
+        SET supplier = %s
+        WHERE supplier = %s
     """, (
         new_name,
         old_name
     ))
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
-        "message": "Supplier updated successfully."
+        "message":
+            "Supplier updated successfully."
     })
 
 
-@app.route("/api/suppliers/<int:supplier_id>", methods=["DELETE"])
+@app.route(
+    "/api/suppliers/<int:supplier_id>",
+    methods=["DELETE"]
+)
 def delete_supplier(supplier_id):
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    supplier = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM suppliers
-        WHERE id = ?
-    """, (supplier_id,)).fetchone()
+        WHERE id = %s
+    """, (supplier_id,))
+
+    supplier = cursor.fetchone()
 
     if not supplier:
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -1052,32 +1234,40 @@ def delete_supplier(supplier_id):
             "message": "Supplier not found."
         }), 404
 
-    product_count = connection.execute("""
+    cursor.execute("""
         SELECT COUNT(*) AS count
         FROM products
-        WHERE supplier = ?
-    """, (supplier["name"],)).fetchone()["count"]
+        WHERE supplier = %s
+    """, (supplier["name"],))
+
+    product_count = (
+        cursor.fetchone()["count"]
+    )
 
     if product_count > 0:
+        cursor.close()
         connection.close()
 
         return jsonify({
             "success": False,
             "message":
-            "This supplier cannot be deleted because it contains products."
+                "This supplier cannot be deleted "
+                "because it contains products."
         }), 400
 
-    connection.execute(
-        "DELETE FROM suppliers WHERE id = ?",
+    cursor.execute(
+        "DELETE FROM suppliers WHERE id = %s",
         (supplier_id,)
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
 
     return jsonify({
         "success": True,
-        "message": "Supplier deleted successfully."
+        "message":
+            "Supplier deleted successfully."
     })
 
 
@@ -1090,23 +1280,24 @@ def reports_page():
     return render_template("reports.html")
 
 
-@app.route("/api/reports", methods=["GET"])
+@app.route(
+    "/api/reports",
+    methods=["GET"]
+)
 def reports_data():
-
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    products = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
         ORDER BY name
-    """).fetchall()
+    """)
 
+    products = cursor.fetchall()
+
+    cursor.close()
     connection.close()
-
-
-    # ========================================
-    # SUMMARY
-    # ========================================
 
     total_products = len(products)
 
@@ -1116,7 +1307,8 @@ def reports_data():
     )
 
     inventory_value = sum(
-        product["quantity"] * product["price"]
+        product["quantity"]
+        * product["price"]
         for product in products
     )
 
@@ -1130,38 +1322,22 @@ def reports_data():
         total_products - low_stock_count
     )
 
-
-    # ========================================
-    # CATEGORY DATA
-    # ========================================
-
     category_counts = {}
     category_values = {}
 
-
     for product in products:
-
         category = product["category"]
 
         if category not in category_counts:
             category_counts[category] = 0
             category_values[category] = 0
 
-
-        # Number of products
         category_counts[category] += 1
 
-
-        # Inventory value
         category_values[category] += (
             product["quantity"]
             * product["price"]
         )
-
-
-    # ========================================
-    # PRODUCT STOCK DATA
-    # ========================================
 
     product_names = [
         product["name"]
@@ -1173,14 +1349,7 @@ def reports_data():
         for product in products
     ]
 
-
-    # ========================================
-    # RETURN REPORT DATA
-    # ========================================
-
     return jsonify({
-
-        # Summary cards
         "total_products":
             total_products,
 
@@ -1193,16 +1362,12 @@ def reports_data():
         "low_stock_count":
             low_stock_count,
 
-
-        # Products by category
         "category_names":
             list(category_counts.keys()),
 
         "category_counts":
             list(category_counts.values()),
 
-
-        # Inventory value by category
         "category_value_names":
             list(category_values.keys()),
 
@@ -1211,16 +1376,12 @@ def reports_data():
             for value in category_values.values()
         ],
 
-
-        # Stock levels
         "product_names":
             product_names,
 
         "product_quantities":
             product_quantities,
 
-
-        # Stock health
         "stock_health_labels": [
             "Healthy Stock",
             "Low Stock"
@@ -1230,8 +1391,8 @@ def reports_data():
             healthy_stock_count,
             low_stock_count
         ]
-
     })
+
 
 # ========================================
 # EXPORT CSV
@@ -1240,13 +1401,17 @@ def reports_data():
 @app.route("/export/csv")
 def export_csv():
     connection = get_db_connection()
+    cursor = connection.cursor()
 
-    products = connection.execute("""
+    cursor.execute("""
         SELECT *
         FROM products
         ORDER BY id DESC
-    """).fetchall()
+    """)
 
+    products = cursor.fetchall()
+
+    cursor.close()
     connection.close()
 
     output = io.StringIO()
@@ -1279,9 +1444,17 @@ def export_csv():
         mimetype="text/csv",
         headers={
             "Content-Disposition":
-            "attachment; filename=inventory_report.csv"
+                "attachment; "
+                "filename=inventory_report.csv"
         }
     )
+
+
+# ========================================
+# INITIALIZE DATABASE
+# ========================================
+
+create_database()
 
 
 # ========================================
@@ -1289,5 +1462,7 @@ def export_csv():
 # ========================================
 
 if __name__ == "__main__":
-    create_database()
-    app.run(debug=True, port=5001)
+    app.run(
+        debug=True,
+        port=5001
+    )
