@@ -24,7 +24,9 @@ def get_db_connection():
 
     return psycopg2.connect(
         DATABASE_URL,
-        cursor_factory=RealDictCursor
+        cursor_factory=RealDictCursor,
+        connect_timeout=10
+        
     )
 
 
