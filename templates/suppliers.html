@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Suppliers | StockFlow</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SHARED SIDEBAR -->
+    {% set active_page = 'suppliers' %}
+    {% include 'sidebar.html' %}
+
+
+    <main class="main">
+
+        <div class="topbar">
+
+            <div>
+                <h1>Suppliers</h1>
+                <p>View and manage inventory suppliers.</p>
+            </div>
+
+            <div class="profile">
+                SF
+            </div>
+
+        </div>
+
+
+        <!-- SUPPLIERS TABLE -->
+        <section class="content-card">
+
+            <div class="card-header">
+
+                <h2>Inventory Suppliers</h2>
+
+                <button
+                    class="add-btn"
+                    id="addSupplierButton"
+                >
+                    + Add Supplier
+                </button>
+
+            </div>
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Supplier</th>
+                        <th>Products</th>
+                        <th>Total Stock</th>
+                        <th>Inventory Value</th>
+                        <th>Actions</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% if suppliers %}
+
+                        {% for supplier in suppliers %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ supplier.supplier }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ supplier.product_count }}
+                            </td>
+
+                            <td>
+                                {{ supplier.total_stock }}
+                            </td>
+
+                            <td>
+                                ${{ "%.2f"|format(supplier.total_value) }}
+                            </td>
+
+                            <td>
+
+                                <button
+                                    class="table-action supplier-edit-btn"
+                                    data-id="{{ supplier.id }}"
+                                    data-name="{{ supplier.supplier }}"
+                                >
+                                    Edit
+                                </button>
+
+                                <button
+                                    class="delete-btn supplier-delete-btn"
+                                    data-id="{{ supplier.id }}"
+                                    data-name="{{ supplier.supplier }}"
+                                >
+                                    Delete
+                                </button>
+
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+
+                    {% else %}
+
+                        <tr>
+
+                            <td colspan="5" class="empty">
+                                No suppliers available.
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<!-- SUPPLIER MODAL -->
+
+<div
+    class="modal"
+    id="supplierModal"
+>
+
+    <div class="modal-content">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2 id="supplierModalTitle">
+                    Add New Supplier
+                </h2>
+
+                <p id="supplierModalDescription">
+                    Enter the supplier name below.
+                </p>
+
+            </div>
+
+            <button
+                class="close-btn"
+                id="closeSupplierModal"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <form id="supplierForm">
+
+            <div class="form-group">
+
+                <label>
+                    Supplier Name
+                </label>
+
+                <input
+                    type="text"
+                    id="supplierName"
+                    placeholder="e.g. Samsung"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-actions">
+
+                <button
+                    type="button"
+                    class="cancel-btn"
+                    id="cancelSupplier"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                    id="saveSupplierButton"
+                >
+                    Save Supplier
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    // ========================================
+    // ELEMENTS
+    // ========================================
+
+    const supplierModal =
+        document.getElementById("supplierModal");
+
+    const addSupplierButton =
+        document.getElementById("addSupplierButton");
+
+    const closeSupplierButton =
+        document.getElementById("closeSupplierModal");
+
+    const cancelSupplierButton =
+        document.getElementById("cancelSupplier");
+
+    const supplierForm =
+        document.getElementById("supplierForm");
+
+    const supplierNameInput =
+        document.getElementById("supplierName");
+
+    const supplierModalTitle =
+        document.getElementById("supplierModalTitle");
+
+    const supplierModalDescription =
+        document.getElementById("supplierModalDescription");
+
+    const saveSupplierButton =
+        document.getElementById("saveSupplierButton");
+
+
+    // ========================================
+    // ADD SUPPLIER
+    // ========================================
+
+    addSupplierButton.addEventListener(
+        "click",
+        () => {
+
+            supplierForm.reset();
+
+            delete supplierForm.dataset.editId;
+
+            supplierModalTitle.textContent =
+                "Add New Supplier";
+
+            supplierModalDescription.textContent =
+                "Enter the supplier name below.";
+
+            saveSupplierButton.textContent =
+                "Save Supplier";
+
+            supplierModal.classList.add("show");
+
+            supplierNameInput.focus();
+
+        }
+    );
+
+
+    // ========================================
+    // CLOSE MODAL
+    // ========================================
+
+    function closeSupplierModal() {
+
+        supplierModal.classList.remove("show");
+
+        supplierForm.reset();
+
+        delete supplierForm.dataset.editId;
+
+    }
+
+
+    closeSupplierButton.addEventListener(
+        "click",
+        closeSupplierModal
+    );
+
+
+    cancelSupplierButton.addEventListener(
+        "click",
+        closeSupplierModal
+    );
+
+
+    supplierModal.addEventListener(
+        "click",
+        (event) => {
+
+            if (event.target === supplierModal) {
+                closeSupplierModal();
+            }
+
+        }
+    );
+
+
+    document.addEventListener(
+        "keydown",
+        (event) => {
+
+            if (event.key === "Escape") {
+                closeSupplierModal();
+            }
+
+        }
+    );
+
+
+    // ========================================
+    // EDIT SUPPLIER
+    // ========================================
+
+    document
+        .querySelectorAll(".supplier-edit-btn")
+        .forEach(button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    supplierForm.dataset.editId =
+                        button.dataset.id;
+
+                    supplierNameInput.value =
+                        button.dataset.name;
+
+                    supplierModalTitle.textContent =
+                        "Edit Supplier";
+
+                    supplierModalDescription.textContent =
+                        "Update the supplier name below.";
+
+                    saveSupplierButton.textContent =
+                        "Save Changes";
+
+                    supplierModal.classList.add("show");
+
+                    supplierNameInput.focus();
+
+                }
+            );
+
+        });
+
+
+    // ========================================
+    // SAVE ADD OR EDIT
+    // ========================================
+
+    supplierForm.addEventListener(
+        "submit",
+        async (event) => {
+
+            event.preventDefault();
+
+            const name =
+                supplierNameInput.value.trim();
+
+            if (!name) {
+                return;
+            }
+
+            const editId =
+                supplierForm.dataset.editId;
+
+            let url =
+                "/api/suppliers";
+
+            let method =
+                "POST";
+
+
+            if (editId) {
+
+                url =
+                    `/api/suppliers/${editId}`;
+
+                method =
+                    "PUT";
+
+            }
+
+
+            try {
+
+                saveSupplierButton.disabled = true;
+
+                const response =
+                    await fetch(
+                        url,
+                        {
+                            method: method,
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+                                name: name
+                            })
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+
+                if (result.success) {
+
+                    window.location.reload();
+
+                    return;
+
+                }
+
+
+                alert(
+                    result.message ||
+                    "Unable to save supplier."
+                );
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    "Error saving supplier:",
+                    error
+                );
+
+                alert(
+                    "Something went wrong while saving the supplier."
+                );
+
+            }
+
+            finally {
+
+                saveSupplierButton.disabled = false;
+
+            }
+
+        }
+    );
+
+
+    // ========================================
+    // DELETE SUPPLIER
+    // ========================================
+
+    document
+        .querySelectorAll(".supplier-delete-btn")
+        .forEach(button => {
+
+            button.addEventListener(
+                "click",
+                async () => {
+
+                    const supplierId =
+                        button.dataset.id;
+
+                    const supplierName =
+                        button.dataset.name;
+
+
+                    const confirmDelete =
+                        confirm(
+                            `Are you sure you want to delete "${supplierName}"?`
+                        );
+
+
+                    if (!confirmDelete) {
+                        return;
+                    }
+
+
+                    try {
+
+                        const response =
+                            await fetch(
+                                `/api/suppliers/${supplierId}`,
+                                {
+                                    method: "DELETE"
+                                }
+                            );
+
+
+                        const result =
+                            await response.json();
+
+
+                        if (result.success) {
+
+                            window.location.reload();
+
+                            return;
+
+                        }
+
+
+                        alert(
+                            result.message ||
+                            "Unable to delete supplier."
+                        );
+
+                    }
+
+                    catch (error) {
+
+                        console.error(
+                            "Error deleting supplier:",
+                            error
+                        );
+
+                        alert(
+                            "Something went wrong while deleting the supplier."
+                        );
+
+                    }
+
+                }
+            );
+
+        });
+
+</script>
+
+</body>
+
+</html>

@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Products | StockFlow</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    {% set active_page = 'products' %}
+    {% include 'sidebar.html' %}
+
+    <main class="main">
+
+        <div class="topbar">
+
+            <div>
+                <h1>Products</h1>
+                <p>Manage and monitor all inventory products.</p>
+            </div>
+
+            <div class="profile">
+                SF
+            </div>
+
+        </div>
+
+
+        <section class="content-card">
+
+            <div class="card-header">
+
+                <h2>All Products</h2>
+
+                <div class="actions">
+
+                    <input
+                        class="search"
+                        id="searchInput"
+                        type="text"
+                        placeholder="Search products..."
+                    >
+
+                    <a href="/export/csv" class="export-btn">
+                        Export CSV
+                    </a>
+
+                    <button
+                        type="button"
+                        class="add-btn"
+                    >
+                        + Add Product
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Product</th>
+                        <th>Category</th>
+                        <th>Quantity</th>
+                        <th>Price</th>
+                        <th>Supplier</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {% if products %}
+
+                        {% for product in products %}
+
+                        <tr class="product-row">
+
+                            <td>
+                                <strong>{{ product.name }}</strong>
+                            </td>
+
+                            <td>
+                                {{ product.category }}
+                            </td>
+
+                            <td>
+                                {{ product.quantity }}
+                            </td>
+
+                            <td>
+                                ${{ "%.2f"|format(product.price) }}
+                            </td>
+
+                            <td>
+                                {{ product.supplier if product.supplier else "—" }}
+                            </td>
+
+                            <td>
+
+                                {% if product.status == "Low Stock" %}
+
+                                    <span class="status low">
+                                        Low Stock
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status active">
+                                        Active
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td>
+
+                                <div class="product-actions">
+
+                                    <!-- EDIT -->
+                                    <button
+                                        type="button"
+                                        class="table-action edit-btn"
+                                        data-id="{{ product.id }}"
+                                        data-name="{{ product.name }}"
+                                        data-category="{{ product.category }}"
+                                        data-quantity="{{ product.quantity }}"
+                                        data-price="{{ product.price }}"
+                                        data-supplier="{{ product.supplier or '' }}"
+                                    >
+                                        Edit
+                                    </button>
+
+
+                                    <!-- STOCK IN -->
+                                    <button
+                                        type="button"
+                                        class="stock-in-btn"
+                                        data-id="{{ product.id }}"
+                                        data-name="{{ product.name }}"
+                                        data-quantity="{{ product.quantity }}"
+                                    >
+                                        Stock In
+                                    </button>
+
+
+                                    <!-- STOCK OUT -->
+                                    <button
+                                        type="button"
+                                        class="stock-out-btn"
+                                        data-id="{{ product.id }}"
+                                        data-name="{{ product.name }}"
+                                        data-quantity="{{ product.quantity }}"
+                                    >
+                                        Stock Out
+                                    </button>
+
+
+                                    <!-- MORE MENU -->
+                                    <div class="more-menu">
+
+                                        <button
+                                            type="button"
+                                            class="more-btn"
+                                            aria-label="More actions"
+                                        >
+                                            ⋯
+                                        </button>
+
+
+                                        <div class="more-dropdown">
+
+                                            <button
+                                                type="button"
+                                                class="history-btn dropdown-action"
+                                                data-id="{{ product.id }}"
+                                                data-name="{{ product.name }}"
+                                            >
+                                                View History
+                                            </button>
+
+
+                                            <button
+                                                type="button"
+                                                class="delete-btn dropdown-action dropdown-delete"
+                                                data-id="{{ product.id }}"
+                                            >
+                                                Delete Product
+                                            </button>
+
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+                    {% else %}
+
+                        <tr>
+
+                            <td
+                                colspan="7"
+                                class="empty"
+                            >
+                                No products available.
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<!-- ======================================
+     PRODUCT MODAL
+======================================= -->
+
+<div class="modal" id="productModal">
+
+    <div class="modal-content">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2 id="modalTitle">
+                    Add New Product
+                </h2>
+
+                <p id="modalDescription">
+                    Enter the product information below.
+                </p>
+
+            </div>
+
+            <button
+                type="button"
+                class="close-btn"
+                id="closeModal"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <form id="productForm">
+
+            <div class="form-group">
+
+                <label for="productName">
+                    Product Name
+                </label>
+
+                <input
+                    type="text"
+                    id="productName"
+                    placeholder="e.g. Wireless Mouse"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="productCategory">
+                        Category
+                    </label>
+
+                    <select
+                        id="productCategory"
+                        required
+                    >
+
+                        <option value="">
+                            Select Category
+                        </option>
+
+                        {% for category in categories %}
+
+                            <option value="{{ category.name }}">
+                                {{ category.name }}
+                            </option>
+
+                        {% endfor %}
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="productSupplier">
+                        Supplier
+                    </label>
+
+                    <select id="productSupplier">
+
+                        <option value="">
+                            Select Supplier
+                        </option>
+
+                        {% for supplier in suppliers %}
+
+                            <option value="{{ supplier.name }}">
+                                {{ supplier.name }}
+                            </option>
+
+                        {% endfor %}
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div
+                    class="form-group"
+                    id="quantityFormGroup"
+                >
+
+                    <label for="productQuantity">
+                        Initial Quantity
+                    </label>
+
+                    <input
+                        type="number"
+                        id="productQuantity"
+                        min="0"
+                        placeholder="0"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="productPrice">
+                        Price
+                    </label>
+
+                    <div class="price-input">
+
+                        <span>$</span>
+
+                        <input
+                            type="number"
+                            id="productPrice"
+                            min="0"
+                            step="0.01"
+                            placeholder="0.00"
+                            required
+                        >
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="form-actions">
+
+                <button
+                    type="button"
+                    class="cancel-btn"
+                    id="cancelProduct"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                    id="saveProductButton"
+                >
+                    Save Product
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- ======================================
+     STOCK MOVEMENT MODAL
+======================================= -->
+
+<div class="modal" id="stockModal">
+
+    <div class="modal-content stock-modal-content">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2 id="stockModalTitle">
+                    Stock In
+                </h2>
+
+                <p id="stockModalDescription">
+                    Update product stock.
+                </p>
+
+            </div>
+
+            <button
+                type="button"
+                class="close-btn"
+                id="closeStockModal"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <form id="stockForm">
+
+            <div class="stock-current">
+
+                <span>
+                    Current Stock
+                </span>
+
+                <strong id="currentStock">
+                    0 units
+                </strong>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label
+                    for="stockAmount"
+                    id="stockAmountLabel"
+                >
+                    Quantity to Add
+                </label>
+
+                <input
+                    type="number"
+                    id="stockAmount"
+                    min="1"
+                    step="1"
+                    placeholder="Enter quantity"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-actions">
+
+                <button
+                    type="button"
+                    class="cancel-btn"
+                    id="cancelStock"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                    id="saveStockButton"
+                >
+                    Add Stock
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- ======================================
+     STOCK HISTORY MODAL
+======================================= -->
+
+<div class="modal" id="historyModal">
+
+    <div class="modal-content history-modal-content">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Stock History
+                </h2>
+
+                <p id="historyProductName">
+                    Product activity and stock movements.
+                </p>
+
+            </div>
+
+            <button
+                type="button"
+                class="close-btn"
+                id="closeHistoryModal"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <div
+            class="product-history-list"
+            id="productHistoryList"
+        >
+
+            <div class="history-loading">
+                Loading history...
+            </div>
+
+        </div>
+
+
+        <div class="history-footer">
+
+            <button
+                type="button"
+                class="cancel-btn"
+                id="closeHistoryButton"
+            >
+                Close
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+
+</html>

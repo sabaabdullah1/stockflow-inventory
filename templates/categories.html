@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Categories | StockFlow</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SHARED SIDEBAR -->
+    {% set active_page = 'categories' %}
+    {% include 'sidebar.html' %}
+
+
+    <main class="main">
+
+        <!-- TOP BAR -->
+        <div class="topbar">
+
+            <div>
+                <h1>Categories</h1>
+                <p>View and manage inventory categories.</p>
+            </div>
+
+            <div class="profile">
+                SF
+            </div>
+
+        </div>
+
+
+        <!-- CATEGORY TABLE -->
+        <section class="content-card">
+
+            <div class="card-header">
+
+                <h2>Product Categories</h2>
+
+                <button
+                    class="add-btn"
+                    id="addCategoryButton"
+                >
+                    + Add Category
+                </button>
+
+            </div>
+
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Products</th>
+                        <th>Total Stock</th>
+                        <th>Inventory Value</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+
+                <tbody>
+
+                    {% if categories %}
+
+                        {% for category in categories %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ category.category }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ category.product_count }}
+                            </td>
+
+                            <td>
+                                {{ category.total_stock }}
+                            </td>
+
+                            <td>
+                                ${{ "%.2f"|format(category.total_value) }}
+                            </td>
+
+                            <td>
+
+                                <button
+                                    class="table-action category-edit-btn"
+                                    data-id="{{ category.id }}"
+                                    data-name="{{ category.category }}"
+                                >
+                                    Edit
+                                </button>
+
+                                <button
+                                    class="delete-btn category-delete-btn"
+                                    data-id="{{ category.id }}"
+                                    data-name="{{ category.category }}"
+                                >
+                                    Delete
+                                </button>
+
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+
+                    {% else %}
+
+                        <tr>
+                            <td colspan="5" class="empty">
+                                No categories available.
+                            </td>
+                        </tr>
+
+                    {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<!-- CATEGORY MODAL -->
+<div
+    class="modal"
+    id="categoryModal"
+>
+
+    <div class="modal-content">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2 id="categoryModalTitle">
+                    Add New Category
+                </h2>
+
+                <p id="categoryModalDescription">
+                    Enter the category name below.
+                </p>
+
+            </div>
+
+            <button
+                class="close-btn"
+                id="closeCategoryModal"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <form id="categoryForm">
+
+            <div class="form-group">
+
+                <label>
+                    Category Name
+                </label>
+
+                <input
+                    type="text"
+                    id="categoryName"
+                    placeholder="e.g. Electronics"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-actions">
+
+                <button
+                    type="button"
+                    class="cancel-btn"
+                    id="cancelCategory"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                    id="saveCategoryButton"
+                >
+                    Save Category
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    // ========================================
+    // CATEGORY ELEMENTS
+    // ========================================
+
+    const categoryModal =
+        document.getElementById("categoryModal");
+
+    const addCategoryButton =
+        document.getElementById("addCategoryButton");
+
+    const closeCategoryButton =
+        document.getElementById("closeCategoryModal");
+
+    const cancelCategoryButton =
+        document.getElementById("cancelCategory");
+
+    const categoryForm =
+        document.getElementById("categoryForm");
+
+    const categoryNameInput =
+        document.getElementById("categoryName");
+
+    const categoryModalTitle =
+        document.getElementById("categoryModalTitle");
+
+    const categoryModalDescription =
+        document.getElementById("categoryModalDescription");
+
+    const saveCategoryButton =
+        document.getElementById("saveCategoryButton");
+
+
+    // ========================================
+    // OPEN ADD CATEGORY
+    // ========================================
+
+    addCategoryButton.addEventListener(
+        "click",
+        () => {
+
+            categoryForm.reset();
+
+            delete categoryForm.dataset.editId;
+
+            categoryModalTitle.textContent =
+                "Add New Category";
+
+            categoryModalDescription.textContent =
+                "Enter the category name below.";
+
+            saveCategoryButton.textContent =
+                "Save Category";
+
+            categoryModal.classList.add("show");
+
+            categoryNameInput.focus();
+
+        }
+    );
+
+
+    // ========================================
+    // CLOSE MODAL
+    // ========================================
+
+    function closeCategoryModal() {
+
+        categoryModal.classList.remove("show");
+
+        categoryForm.reset();
+
+        delete categoryForm.dataset.editId;
+
+    }
+
+
+    closeCategoryButton.addEventListener(
+        "click",
+        closeCategoryModal
+    );
+
+
+    cancelCategoryButton.addEventListener(
+        "click",
+        closeCategoryModal
+    );
+
+
+    categoryModal.addEventListener(
+        "click",
+        (event) => {
+
+            if (event.target === categoryModal) {
+                closeCategoryModal();
+            }
+
+        }
+    );
+
+
+    document.addEventListener(
+        "keydown",
+        (event) => {
+
+            if (event.key === "Escape") {
+                closeCategoryModal();
+            }
+
+        }
+    );
+
+
+    // ========================================
+    // EDIT CATEGORY
+    // ========================================
+
+    document
+        .querySelectorAll(".category-edit-btn")
+        .forEach(button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    categoryForm.dataset.editId =
+                        button.dataset.id;
+
+                    categoryNameInput.value =
+                        button.dataset.name;
+
+                    categoryModalTitle.textContent =
+                        "Edit Category";
+
+                    categoryModalDescription.textContent =
+                        "Update the category name below.";
+
+                    saveCategoryButton.textContent =
+                        "Save Changes";
+
+                    categoryModal.classList.add("show");
+
+                    categoryNameInput.focus();
+
+                }
+            );
+
+        });
+
+
+    // ========================================
+    // ADD OR UPDATE CATEGORY
+    // ========================================
+
+    categoryForm.addEventListener(
+        "submit",
+        async (event) => {
+
+            event.preventDefault();
+
+
+            const name =
+                categoryNameInput.value.trim();
+
+
+            if (!name) {
+                return;
+            }
+
+
+            const editId =
+                categoryForm.dataset.editId;
+
+
+            let url =
+                "/api/categories";
+
+            let method =
+                "POST";
+
+
+            if (editId) {
+
+                url =
+                    `/api/categories/${editId}`;
+
+                method =
+                    "PUT";
+
+            }
+
+
+            try {
+
+                saveCategoryButton.disabled = true;
+
+
+                const response =
+                    await fetch(
+                        url,
+                        {
+                            method: method,
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+                                name: name
+                            })
+                        }
+                    );
+
+
+                const result =
+                    await response.json();
+
+
+                if (result.success) {
+
+                    window.location.reload();
+
+                    return;
+
+                }
+
+
+                alert(
+                    result.message ||
+                    "Unable to save category."
+                );
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    "Error saving category:",
+                    error
+                );
+
+                alert(
+                    "Something went wrong while saving the category."
+                );
+
+            }
+
+            finally {
+
+                saveCategoryButton.disabled = false;
+
+            }
+
+        }
+    );
+
+
+    // ========================================
+    // DELETE CATEGORY
+    // ========================================
+
+    document
+        .querySelectorAll(".category-delete-btn")
+        .forEach(button => {
+
+            button.addEventListener(
+                "click",
+                async () => {
+
+                    const categoryId =
+                        button.dataset.id;
+
+                    const categoryName =
+                        button.dataset.name;
+
+
+                    const confirmDelete =
+                        confirm(
+                            `Are you sure you want to delete "${categoryName}"?`
+                        );
+
+
+                    if (!confirmDelete) {
+                        return;
+                    }
+
+
+                    try {
+
+                        const response =
+                            await fetch(
+                                `/api/categories/${categoryId}`,
+                                {
+                                    method: "DELETE"
+                                }
+                            );
+
+
+                        const result =
+                            await response.json();
+
+
+                        if (result.success) {
+
+                            window.location.reload();
+
+                            return;
+
+                        }
+
+
+                        alert(
+                            result.message ||
+                            "Unable to delete category."
+                        );
+
+                    }
+
+                    catch (error) {
+
+                        console.error(
+                            "Error deleting category:",
+                            error
+                        );
+
+                        alert(
+                            "Something went wrong while deleting the category."
+                        );
+
+                    }
+
+                }
+            );
+
+        });
+
+</script>
+
+</body>
+
+</html>

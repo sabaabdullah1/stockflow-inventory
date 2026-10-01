@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Dashboard | StockFlow</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SHARED SIDEBAR -->
+    {% set active_page = 'dashboard' %}
+    {% include 'sidebar.html' %}
+
+
+    <main class="main">
+
+        <!-- TOP BAR -->
+        <div class="topbar">
+
+            <div>
+                <h1>Inventory Dashboard</h1>
+                <p>Monitor your inventory performance and stock levels.</p>
+            </div>
+
+            <div class="profile">
+                SF
+            </div>
+
+        </div>
+
+
+        <!-- LOW STOCK ALERT -->
+
+        {% set low_stock_count =
+            products
+            |selectattr('status', 'equalto', 'Low Stock')
+            |list
+            |length
+        %}
+
+        {% if low_stock_count > 0 %}
+
+        <div class="inventory-alert">
+
+            <div class="alert-content">
+
+                <div class="alert-title">
+                    Low Stock Alert
+                </div>
+
+                <div class="alert-message">
+
+                    {{ low_stock_count }}
+
+                    {% if low_stock_count == 1 %}
+                        product is
+                    {% else %}
+                        products are
+                    {% endif %}
+
+                    running low on stock and need attention.
+
+                </div>
+
+            </div>
+
+            <a
+                href="#low-stock-section"
+                class="alert-action"
+            >
+                Review Stock
+            </a>
+
+        </div>
+
+        {% endif %}
+
+
+        <!-- STAT CARDS -->
+        <section class="stats">
+
+            <div class="stat-card">
+
+                <div class="label">
+                    Total Products
+                </div>
+
+                <div class="value">
+                    {{ products|length }}
+                </div>
+
+                <div class="sub">
+                    Products in inventory
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="label">
+                    Total Stock
+                </div>
+
+                <div class="value">
+                    {{ products|sum(attribute='quantity') }}
+                </div>
+
+                <div class="sub">
+                    Units currently available
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="label">
+                    Low Stock
+                </div>
+
+                <div class="value">
+                    {{ low_stock_count }}
+                </div>
+
+                <div class="sub">
+                    Products need attention
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="label">
+                    Inventory Value
+                </div>
+
+                <div class="value">
+                    ${{ "%.2f"|format(inventory_value) }}
+                </div>
+
+                <div class="sub">
+                    Current inventory value
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- LOW STOCK PRODUCTS -->
+        <section
+            class="content-card"
+            id="low-stock-section"
+        >
+
+            <div class="card-header">
+
+                <div>
+                    <h2>Low Stock Products</h2>
+                </div>
+
+                <a
+                    href="/products"
+                    class="export-btn"
+                >
+                    View All Products
+                </a>
+
+            </div>
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Product</th>
+                        <th>Category</th>
+                        <th>Quantity</th>
+                        <th>Supplier</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% set low_stock_products =
+                        products
+                        |selectattr(
+                            'status',
+                            'equalto',
+                            'Low Stock'
+                        )
+                        |list
+                    %}
+
+
+                    {% if low_stock_products %}
+
+                        {% for product in low_stock_products %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ product.name }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ product.category }}
+                            </td>
+
+                            <td>
+
+                                <span class="stock-count low-stock-count">
+                                    {{ product.quantity }} units
+                                </span>
+
+                            </td>
+
+                            <td>
+                                {{ product.supplier if product.supplier else "—" }}
+                            </td>
+
+                            <td>
+
+                                <span class="status low">
+                                    Low Stock
+                                </span>
+
+                            </td>
+
+                            <td>
+
+                                <a
+                                    href="/products?stock={{ product.id }}"
+                                    class="restock-btn"
+                                >
+                                    Restock
+                                </a>
+
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+
+                    {% else %}
+
+                        <tr>
+
+                            <td
+                                colspan="6"
+                                class="empty"
+                            >
+                                All products currently have sufficient stock.
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+
+        <!-- RECENT PRODUCTS -->
+        <section class="content-card dashboard-section">
+
+            <div class="card-header">
+
+                <div>
+                    <h2>Recent Products</h2>
+                </div>
+
+                <a
+                    href="/reports"
+                    class="export-btn"
+                >
+                    View Reports
+                </a>
+
+            </div>
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Product</th>
+                        <th>Category</th>
+                        <th>Quantity</th>
+                        <th>Price</th>
+                        <th>Status</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% if products %}
+
+                        {% for product in products[:5] %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ product.name }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ product.category }}
+                            </td>
+
+                            <td>
+                                {{ product.quantity }}
+                            </td>
+
+                            <td>
+                                ${{ "%.2f"|format(product.price) }}
+                            </td>
+
+                            <td>
+
+                                {% if product.status == "Low Stock" %}
+
+                                    <span class="status low">
+                                        Low Stock
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status active">
+                                        Active
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+
+                    {% else %}
+
+                        <tr>
+
+                            <td
+                                colspan="5"
+                                class="empty"
+                            >
+                                No products available.
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+
+        <!-- RECENT ACTIVITY -->
+        <section class="content-card dashboard-section">
+
+            <div class="card-header">
+
+                <div>
+                    <h2>Recent Activity</h2>
+                </div>
+
+                <span class="activity-label">
+                    Latest 5 activities
+                </span>
+
+            </div>
+
+
+            <div class="activity-list">
+
+                {% if activities %}
+
+                    {% for activity in activities %}
+
+                    <div class="activity-item">
+
+                        <div class="activity-indicator
+    
+                        {% if activity.action == 'Product Added' %}
+    
+                        activity-added
+
+   
+                        {% elif activity.action == 'Product Restocked'
+   
+                        or activity.action == 'Stock In' %}
+   
+                        activity-restocked
+
+   
+                        {% elif activity.action == 'Stock Out' %}
+   
+                        activity-stock-out
+
+   
+                        {% elif activity.action == 'Product Deleted' %}
+   
+                        activity-deleted
+
+   
+                        {% else %}
+   
+                        activity-updated
+   
+                        {% endif %}
+
+                        ">
+
+                    </div>
+
+
+                        <div class="activity-info">
+
+                            <div class="activity-top">
+
+                                <span class="activity-action">
+                                    {{ activity.action }}
+                                </span>
+
+                                <span class="activity-time">
+  
+                                    {{ activity.time_ago }}
+
+                                </span>
+
+                            </div>
+
+                            <div class="activity-details">
+                                {{ activity.details }}
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    {% endfor %}
+
+
+                {% else %}
+
+                    <div class="activity-empty">
+                        No inventory activity recorded yet.
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+</body>
+
+</html>

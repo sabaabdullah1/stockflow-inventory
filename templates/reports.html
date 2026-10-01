@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Reports | StockFlow</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SHARED SIDEBAR -->
+    {% set active_page = 'reports' %}
+    {% include 'sidebar.html' %}
+
+
+    <!-- MAIN CONTENT -->
+    <main class="main">
+
+        <!-- TOP BAR -->
+        <div class="topbar">
+
+            <div>
+                <h1>Inventory Reports</h1>
+                <p>Analyze inventory performance, value and stock levels.</p>
+            </div>
+
+            <div class="profile">
+                SF
+            </div>
+
+        </div>
+
+
+        <!-- ======================================
+             REPORT SUMMARY
+        ======================================= -->
+
+        <section class="report-stats">
+
+            <div class="report-stat-card">
+
+                <div class="report-stat-label">
+                    Inventory Value
+                </div>
+
+                <div
+                    class="report-stat-value"
+                    id="reportInventoryValue"
+                >
+                    $0.00
+                </div>
+
+                <div class="report-stat-sub">
+                    Current stock value
+                </div>
+
+            </div>
+
+
+            <div class="report-stat-card">
+
+                <div class="report-stat-label">
+                    Total Stock
+                </div>
+
+                <div
+                    class="report-stat-value"
+                    id="reportTotalStock"
+                >
+                    0
+                </div>
+
+                <div class="report-stat-sub">
+                    Units available
+                </div>
+
+            </div>
+
+
+            <div class="report-stat-card">
+
+                <div class="report-stat-label">
+                    Total Products
+                </div>
+
+                <div
+                    class="report-stat-value"
+                    id="reportTotalProducts"
+                >
+                    0
+                </div>
+
+                <div class="report-stat-sub">
+                    Products tracked
+                </div>
+
+            </div>
+
+
+            <div class="report-stat-card">
+
+                <div class="report-stat-label">
+                    Low Stock
+                </div>
+
+                <div
+                    class="report-stat-value report-low-value"
+                    id="reportLowStock"
+                >
+                    0
+                </div>
+
+                <div class="report-stat-sub">
+                    Products need attention
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================
+             INVENTORY ANALYTICS
+        ======================================= -->
+
+        <section class="content-card reports">
+
+            <div class="card-header">
+
+                <div>
+                    <h2>Inventory Analytics</h2>
+                    <p class="report-card-description">
+                        Overview of inventory distribution and value.
+                    </p>
+                </div>
+
+                <a
+                    href="/export/csv"
+                    class="export-btn"
+                >
+                    Export CSV
+                </a>
+
+            </div>
+
+
+            <!-- FIRST ROW -->
+
+            <div class="reports-grid">
+
+                <!-- PRODUCTS BY CATEGORY -->
+                <div class="chart-box">
+
+                    <div class="chart-heading">
+
+                        <div>
+                            <h3>
+                                Products by Category
+                            </h3>
+
+                            <p>
+                                Number of products in each category.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+
+                </div>
+
+
+                <!-- INVENTORY VALUE BY CATEGORY -->
+                <div class="chart-box">
+
+                    <div class="chart-heading">
+
+                        <div>
+                            <h3>
+                                Inventory Value by Category
+                            </h3>
+
+                            <p>
+                                Total stock value across categories.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="valueChart"></canvas>
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- SECOND ROW -->
+
+            <div class="reports-grid reports-grid-bottom">
+
+                <!-- STOCK LEVELS -->
+                <div class="chart-box chart-box-wide">
+
+                    <div class="chart-heading">
+
+                        <div>
+                            <h3>
+                                Stock Levels
+                            </h3>
+
+                            <p>
+                                Current quantity available for each product.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="chart-container stock-chart-container">
+                        <canvas id="stockChart"></canvas>
+                    </div>
+
+                </div>
+
+
+                <!-- LOW STOCK OVERVIEW -->
+                <div class="chart-box">
+
+                    <div class="chart-heading">
+
+                        <div>
+                            <h3>
+                                Stock Health
+                            </h3>
+
+                            <p>
+                                Products that may require attention.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="stockHealthChart"></canvas>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<!-- CHART.JS -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- STOCKFLOW JAVASCRIPT -->
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+
+</html>
