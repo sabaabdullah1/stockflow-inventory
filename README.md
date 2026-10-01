@@ -106,4 +106,4 @@ gunicorn app:app
 
 ## Author
 
-Developed as a web-based inventory management project.
+Developed by [sabaabdullah1](https://github.com/sabaabdullah1)
